@@ -1,0 +1,14 @@
+{
+  "id": "com.ninjablocks.webbrick",
+  "name": "driver-webbrick",
+  "version": "0.0.1",
+  "description": "Ninja Sphere - WebBrick Driver",
+  "main": "driver-go-webbrick",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "author": "Paul Cullender <paul@pkhome.co.uk>",
+  "license": "MIT",
+  "topics": {},
+  "maxMemory": 10
+}
