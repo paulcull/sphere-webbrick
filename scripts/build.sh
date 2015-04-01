@@ -1,10 +1,9 @@
 #!/usr/bin/env bash
 set -xe
 
-OWNER=ninjasphere
-BIN_NAME=driver-go-webbrick
-PROJECT_NAME=driver-go-webbrick
-
+OWNER=paulcull
+BIN_NAME=sphere-webbrick
+PROJECT_NAME=sphere-webbrick
 
 # Get the parent directory of where this script is.
 SOURCE="${BASH_SOURCE[0]}"
@@ -35,7 +34,7 @@ go get -d -v ./...
 
 # building the master branch on ci
 if [ "$BUILDBOX_BRANCH" = "master" ]; then
-	go build -ldflags "-X main.BugsnagKey=${BUGSNAG_KEY}" -tags release -o ./bin/${BIN_NAME}
+	go build -ldflags "-X main.GitCommit ${GIT_COMMIT}${GIT_DIRTY}" -tags release -o ./bin/${BIN_NAME}
 else
-	go build -o ./bin/${BIN_NAME}
+	go build -ldflags "-X main.GitCommit ${GIT_COMMIT}${GIT_DIRTY}" -o ./bin/${BIN_NAME}
 fi

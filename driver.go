@@ -8,15 +8,18 @@ import (
 	"github.com/davecgh/go-spew/spew" // For neatly outputting stuff
 
 	"github.com/ninjasphere/go-ninja/api" // Ninja Sphere API
+	"github.com/ninjasphere/go-ninja/logger"
 	"github.com/ninjasphere/go-ninja/support"
 
-	"log"  // Similar thing, I suppose?
+	//"log"  // Similar thing, I suppose?
 	"time" // Used as part of "setInterval" and for pausing code to allow for data to come back
 )
 
 // package.json is required, otherwise the app just exits and doesn't show any output
 var info = ninja.LoadModuleInfo("./package.json")
 var serial string
+
+var log = logger.GetLogger(info.Name)
 
 // Are we ready to rock?
 var ready = false
@@ -55,6 +58,7 @@ func NewWebbrickDriver() (*WebbrickDriver, error) {
 	err := driver.Init(info)
 	if err != nil {
 		log.Fatalf("Failed to initialize Webbrick driver: %s", err)
+		log.Fatalf("Failed to initialize driver: %s", err)
 	}
 
 	// Now we export the driver so the Sphere can find it (?)
@@ -69,7 +73,7 @@ func NewWebbrickDriver() (*WebbrickDriver, error) {
 
 // Start is where the fun and magic happens! The driver is fired up and starts finding sockets
 func (d *WebbrickDriver) Start(config *WebbrickDriverConfig) error {
-	log.Printf("Driver Starting with config %v", config)
+	log.Infof("Driver Starting with config %v", config)
 
 	d.config = config
 	if !d.config.Initialised {
@@ -86,7 +90,7 @@ func (d *WebbrickDriver) Start(config *WebbrickDriverConfig) error {
 func theloop(d *WebbrickDriver, config *WebbrickDriverConfig) error {
 	go func() {
 		started = true
-		fmt.Println("Calling theloop")
+		log.Infof("Calling theloop")
 
 		ready, err := webbrick.Prepare() // You ready?
 		if ready == true {               // Yep! Let's do this!
@@ -96,27 +100,32 @@ func theloop(d *WebbrickDriver, config *WebbrickDriverConfig) error {
 			for { // Loop forever
 				select { // This lets us do non-blocking channel reads. If we have a message, process it. If not, check for UDP data and loop
 				case msg := <-webbrick.Events:
-					// fmt.Println(" **** Event for ", msg.Name, "received...")
+					log.Infof(" **** Event for ", msg.Name, "received...")
 					switch msg.Name {
 					// case "existingtempfound", "existingtriggerfound", "existingpirfound", "existingoutputfound", "existingbuttonfound", "existinglightchannelfound":
 					// 	fmt.Println("  **** "+msg.Name+" Webbrick device updated! DEV ID is", msg.DeviceInfo.DevID)
 
 					case "newwebbrickfound":
-						fmt.Println("  **** "+msg.Name+" Webbrick found! DEV ID is", msg.DeviceInfo.DevID)
+						log.Infof("  **** "+msg.Name+" Webbrick found! DEV ID is", msg.DeviceInfo.DevID)
 						// Start the poller for the webbrick
 						webbrick.PollWBStatus(msg.DeviceInfo.DevID)
 
 					case "newtempfound", "newtriggerfound", "newpirfound", "newoutputfound", "newbuttonfound", "newlightchannelfound":
-						fmt.Println("  **** "+msg.Name+" Webbrick device found! DEV ID is", msg.DeviceInfo.DevID)
-						spew.Dump(msg.DeviceInfo)
-						// device[msg.DeviceInfo.ID] = NewWebbrickDevice(d, msg.DeviceInfo)
+						log.Infof("  **** "+msg.Name+" Webbrick device found! DEV ID is", msg.DeviceInfo.DevID)
+						str := spew.Sdump(msg.DeviceInfo)
+						log.Infof(str)
 
-						// _ = d.Conn.ExportDevice(device[msg.DeviceInfo.ID])
-						// _ = d.Conn.ExportChannel(device[msg.DeviceInfo.ID], device[msg.DeviceInfo.ID].onOffChannel, "on-off")
+						if msg.DeviceInfo.Queried == false {
+							device[msg.DeviceInfo.ID] = NewWebbrickDevice(d, msg.DeviceInfo)
 
-						// device[msg.DeviceInfo.DevID].Device.Name = msg.Name
-						// device[msg.DeviceInfo.DevID].Device.State = msg.DeviceInfo.State
-						// device[msg.DeviceInfo.DevID].onOffChannel.SendState(msg.DeviceInfo.State)
+							// _ = d.Conn.ExportDevice(device[msg.DeviceInfo.ID])
+							// _ = d.Conn.ExportChannel(device[msg.DeviceInfo.ID], device[msg.DeviceInfo.ID].onOffChannel, "on-off")
+							// device[msg.DeviceInfo.ID].Device.Name = msg.Name
+							// device[msg.DeviceInfo.ID].Device.State = msg.DeviceInfo.State
+							// orvibo.Devices[msg.DeviceInfo.MACAddress].Queried = true
+							// device[msg.DeviceInfo.ID].onOffChannel.SendState(msg.DeviceInfo.State)
+
+						}
 
 					}
 				default:

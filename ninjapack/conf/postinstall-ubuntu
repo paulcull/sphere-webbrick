@@ -1,2 +1,2 @@
-/opt/ninjablocks/bin/nservice -q driver-go-webbrick stop || true
-/opt/ninjablocks/bin/nservice -q driver-go-webbrick start  || true
+/opt/ninjablocks/bin/nservice -q sphere-webbrick stop || true
+/opt/ninjablocks/bin/nservice -q sphere-webbrick start  || true

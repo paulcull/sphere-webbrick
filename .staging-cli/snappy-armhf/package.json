@@ -1,0 +1,10 @@
+{
+  "id": "uk.co.pkhome.webbrick",
+  "name": "Webbrick Driver",
+  "version": "0.0.1",
+  "description": "Control of Legacy Webbrick devices",
+  "main": "sphere-webbrick",
+  "author": "Paul Cullender <@paulcull>",
+  "license": "MIT",
+  "maxMemory": 10
+}
