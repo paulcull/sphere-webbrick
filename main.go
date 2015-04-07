@@ -8,7 +8,12 @@ import (
 
 func main() {
 
-	NewWebbrickDriver()
+	_, err := NewWebBrickDriver()
+
+	if err != nil {
+		log.Errorf("Failed to create driver: %s", err)
+		return
+	}
 
 	c := make(chan os.Signal, 1)
 	signal.Notify(c, os.Interrupt, os.Kill)

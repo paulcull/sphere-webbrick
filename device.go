@@ -15,6 +15,18 @@ import (
 	"strings"
 )
 
+const (
+	UNKNOWN = -1 + iota // UNKNOWN is obviously a device that isn't implemented or is unknown. iota means add 1 to the next const, so SOCKET = 0, ALLONE = 1 etc.
+
+	LIGHT     // LIGHT - is possibly a dimmer
+	PIR       // PIR - Trigger
+	BUTTON    // Pushbutton - Trigger
+	TEMP      // Temp sensor
+	STATE     // State
+	HEARTBEAT // Heartbeat
+
+)
+
 // webBrickDevice holds info about our socket.
 type WebbrickDevice struct {
 	driver            ninja.Driver
@@ -23,37 +35,84 @@ type WebbrickDevice struct {
 	onOffChannel      *channels.OnOffChannel
 	brightnessChannel *channels.BrightnessChannel
 	motionChannel     *channels.MotionChannel
-	temperature       *channels.TemperatureChannel
+	tempChannel       *channels.TemperatureChannel
 	Device            webbrick.Device
 	log               *logger.Logger
 }
 
 func NewWebbrickDevice(driver ninja.Driver, id webbrick.Device) *WebbrickDevice {
-	name := id.Name
+	//name := id.Name
+
+	log.Infof("In creating NewWebbrickDevie", id.Name)
+
+	var devProductType, devThingType string
+
+	switch id.Type {
+	case LIGHT:
+		devProductType = "light"
+		devThingType = "Light"
+	case PIR:
+		devProductType = "motion"
+		devThingType = "Motion"
+	case TEMP:
+		devProductType = "temperature"
+		devThingType = "Temperature"
+	default:
+		devProductType = "light"
+		devThingType = "Light"
+	}
+
+	// LIGHT     // LIGHT - is possibly a dimmer
+	// PIR       // PIR - Trigger
+	// BUTTON    // Pushbutton - Trigger
+	// TEMP      // Temp sensor
+	// STATE     // State
+	// HEARTBEAT // Heartbeat
+
+	// switch Devices[devID].Type {
+
+	// // Its a light
+	// case LIGHT:
+	// 	// update the record for new levels
+	// 	Devices[devID].Level = int(level)
+
+	// select { // This lets us do non-blocking channel reads. If we have a message, process it. If not, check for UDP data and loop
+	// case id.Type:
+	// }
+	// devType := id.Type
+
+	log.Infof("Creating a new Device, type: %s. Name now: %s", devThingType, id.Name)
 
 	device := &WebbrickDevice{
 		driver: driver,
 		Device: id,
 		info: &model.Device{
 			NaturalID:     fmt.Sprintf("device%s", id.DevID),
-			NaturalIDType: "light",
-			Name:          &name,
+			NaturalIDType: devProductType,
+			Name:          &id.Name,
 			Signatures: &map[string]string{
 				"ninja:manufacturer": "Webbrick",
-				"ninja:productName":  "WebbrickLightDevice",
-				"ninja:productType":  "Light",
-				"ninja:thingType":    "light",
+				"ninja:productName":  "Webbrick" + devThingType + "Device",
+				"ninja:productType":  devThingType,
+				"ninja:thingType":    devProductType,
 			},
 		},
 		log: logger.GetLogger("Light Device - " + id.Name),
 	}
-	// var log = logger.GetLogger(info.Name)
-	// device.log = log
 
-	device.onOffChannel = channels.NewOnOffChannel(device)
-	device.brightnessChannel = channels.NewBrightnessChannel(device)
-	device.temperature = channels.NewTemperatureChannel(device)
-	device.motionChannel = channels.NewMotionChannel()
+	if devProductType == "light" {
+		device.onOffChannel = channels.NewOnOffChannel(device)
+		device.brightnessChannel = channels.NewBrightnessChannel(device)
+	}
+	if devProductType == "state" {
+		device.onOffChannel = channels.NewOnOffChannel(device)
+	}
+	if devProductType == "temp" {
+		device.onOffChannel = channels.NewTemperatureChannel(device)
+	}
+	if devProductType == "pir" {
+		device.motionChannel = channels.NewMotionChannel()
+	}
 	return device
 }
 
@@ -66,7 +125,7 @@ func (d *WebbrickDevice) GetDriver() ninja.Driver {
 }
 
 func (d *WebbrickDevice) SetBrightness(level float64) error {
-	log.Infof("Setting state to", level)
+	log.Infof("Setting Brightness level to", level)
 	webbrick.SetLevel(d.Device.DevID, level)
 	d.brightnessChannel.Set(level)
 	return nil

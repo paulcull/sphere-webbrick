@@ -26,30 +26,40 @@ var ready = false
 var started = false // Stops us from running theloop twice
 var device = make(map[int]*WebbrickDevice)
 
-// OrviboDriver holds info about our driver, including our configuration
+// WebbrickDriver holds info about our driver, including our configuration
 type WebbrickDriver struct {
 	support.DriverSupport
-	config *WebbrickDriverConfig
+	config *webbrick.WebbrickDriverConfig
 	conn   *ninja.Connection
 }
 
-// OrviboDriverConfig holds config info. I don't think it's extensively used in this driver?
-type WebbrickDriverConfig struct {
-	Initialised     bool
-	NumberOfDevices int
-	PollingMinutes  int
-	PollingActive   bool
-}
+// WebbrickDriverConfig holds config info. I don't think it's extensively used in this driver?
+// type WebbrickDriverConfig struct {
+// 	Name            string
+// 	logger          logger.Logger
+// 	Initialised     bool
+// 	NumberOfDevices int
+// 	PollingMinutes  int
+// 	PollingActive   bool
+// }
 
 // No config provided? Set up some defaults
-func defaultConfig() *WebbrickDriverConfig {
-	return &WebbrickDriverConfig{
+func defaultConfig() *webbrick.WebbrickDriverConfig {
+
+	//log = logger.GetLogger(info.Name)
+
+	return &webbrick.WebbrickDriverConfig{
+		Name:        "PKHome",
 		Initialised: false,
+		//		NinjaLogControl: log,
+		NumberOfDevices: 0,
+		PollingMinutes:  5,
+		PollingActive:   false,
 	}
 }
 
 // NewDriver does what it says on the tin: makes a new driver for us to run.
-func NewWebbrickDriver() (*WebbrickDriver, error) {
+func NewWebBrickDriver() (*WebbrickDriver, error) {
 
 	// Make a new WebbrickDriver. Ampersand means to make a new copy, not reference the parent one (so A = new B instead of A = new B, C = A)
 	driver := &WebbrickDriver{}
@@ -72,7 +82,7 @@ func NewWebbrickDriver() (*WebbrickDriver, error) {
 }
 
 // Start is where the fun and magic happens! The driver is fired up and starts finding sockets
-func (d *WebbrickDriver) Start(config *WebbrickDriverConfig) error {
+func (d *WebbrickDriver) Start(config *webbrick.WebbrickDriverConfig) error {
 	log.Infof("Driver Starting with config %v", config)
 
 	d.config = config
@@ -87,43 +97,100 @@ func (d *WebbrickDriver) Start(config *WebbrickDriverConfig) error {
 	return d.SendEvent("config", config)
 }
 
-func theloop(d *WebbrickDriver, config *WebbrickDriverConfig) error {
+func theloop(d *WebbrickDriver, config *webbrick.WebbrickDriverConfig) error {
 	go func() {
 		started = true
 		log.Infof("Calling theloop")
 
-		ready, err := webbrick.Prepare() // You ready?
-		if ready == true {               // Yep! Let's do this!
+		ready, err := webbrick.Prepare(config) // You ready?
+		if err != nil {
+			log.Errorf("Error calling prepare", err)
+		}
+		if ready == true { // Yep! Let's do this!
 			// Because we'll never reach the end of the for loop (in theory),
 			// we run SendEvent here.
 
 			for { // Loop forever
 				select { // This lets us do non-blocking channel reads. If we have a message, process it. If not, check for UDP data and loop
+
+				// Lets process all these events separately so that we don't miss anything, but can probcess them carefully
 				case msg := <-webbrick.Events:
-					log.Infof(" **** Event for ", msg.Name, "received...")
+					log.Infof(" **** Event for " + msg.Name + " received...") // Tell the world what we've got
 					switch msg.Name {
 					// case "existingtempfound", "existingtriggerfound", "existingpirfound", "existingoutputfound", "existingbuttonfound", "existinglightchannelfound":
 					// 	fmt.Println("  **** "+msg.Name+" Webbrick device updated! DEV ID is", msg.DeviceInfo.DevID)
 
-					case "newwebbrickfound":
+					case "existingwebbrickupdated": // Have got a webbrick that we've already seen
+						//fmt.Println("******* HERE *******")
+						log.Infof("  **** "+msg.Name+" Webbrick seen again! DEV ID is", msg.DeviceInfo.DevID)
+						//fallthrough
+
+					case "newwebbrickfound": // Have got a new webbrick, lets go see what it can do for us
 						log.Infof("  **** "+msg.Name+" Webbrick found! DEV ID is", msg.DeviceInfo.DevID)
 						// Start the poller for the webbrick
 						webbrick.PollWBStatus(msg.DeviceInfo.DevID)
+						//fallthrough
 
 					case "newtempfound", "newtriggerfound", "newpirfound", "newoutputfound", "newbuttonfound", "newlightchannelfound":
+						// These are all the devices that we care about - so lets look after them now
 						log.Infof("  **** "+msg.Name+" Webbrick device found! DEV ID is", msg.DeviceInfo.DevID)
 						str := spew.Sdump(msg.DeviceInfo)
-						log.Infof(str)
+						log.Debugf(str)
 
-						if msg.DeviceInfo.Queried == false {
+						if device[msg.DeviceInfo.ID] == nil { // Do I already know about this on the sphere ???
+							log.Infof("  **** NEW DEVICE NEEDED -  Webbrick device found! DEV ID is", msg.DeviceInfo.DevID)
+
+							// Lets create a new sphere device driver for this webbrick device
 							device[msg.DeviceInfo.ID] = NewWebbrickDevice(d, msg.DeviceInfo)
 
-							// _ = d.Conn.ExportDevice(device[msg.DeviceInfo.ID])
-							// _ = d.Conn.ExportChannel(device[msg.DeviceInfo.ID], device[msg.DeviceInfo.ID].onOffChannel, "on-off")
-							// device[msg.DeviceInfo.ID].Device.Name = msg.Name
-							// device[msg.DeviceInfo.ID].Device.State = msg.DeviceInfo.State
-							// orvibo.Devices[msg.DeviceInfo.MACAddress].Queried = true
-							// device[msg.DeviceInfo.ID].onOffChannel.SendState(msg.DeviceInfo.State)
+							// Now we've got the device back from the creator let's tell the world
+							_ = d.Conn.ExportDevice(device[msg.DeviceInfo.ID])
+
+							// Set the rest of the device up
+							device[msg.DeviceInfo.ID].Device.Name = msg.Name
+							device[msg.DeviceInfo.ID].Device.State = msg.DeviceInfo.State
+							webbrick.Devices[msg.DeviceInfo.DevID].Queried = true
+
+							// Create any special channels for specfic devices and knock it out
+
+							// State output is really just an on-off that we want to support
+							if msg.Name == "newoutputfound" {
+								_ = d.Conn.ExportChannel(device[msg.DeviceInfo.ID], device[msg.DeviceInfo.ID].onOffChannel, "on-off")
+								device[msg.DeviceInfo.ID].onOffChannel.SendState(msg.DeviceInfo.State)
+							}
+
+							// pir output is really just motion that we want to support
+							if msg.Name == "newpirfound" {
+								_ = d.Conn.ExportChannel(device[msg.DeviceInfo.ID], device[msg.DeviceInfo.ID].motionChannel, "motion")
+							}
+
+							// Light output is really just an on-off and brightnessthat we want to support. Don't need colour, but
+							// don't know if NS really care about the non-colour lights
+							if msg.Name == "newlightchannelfound" {
+								_ = d.Conn.ExportChannel(device[msg.DeviceInfo.ID], device[msg.DeviceInfo.ID].onOffChannel, "on-off")
+								_ = d.Conn.ExportChannel(device[msg.DeviceInfo.ID], device[msg.DeviceInfo.ID].brightnessChannel, "brightness")
+								device[msg.DeviceInfo.ID].onOffChannel.SendState(msg.DeviceInfo.State)
+								device[msg.DeviceInfo.ID].brightnessChannel.Set(msg.DeviceInfo.Level)
+							}
+
+						} else {
+							log.Infof("  **** EXISTING DEVICE FOUND -  Webbrick device found! DEV ID is", msg.DeviceInfo.DevID)
+
+							// we have this device already on the sphere, lets just check our labels and levels
+
+							device[msg.DeviceInfo.ID].Device.Name = msg.DeviceInfo.Name
+
+							// State output is really just an on-off that we want to support
+							if msg.Name == "newoutputfound" {
+								device[msg.DeviceInfo.ID].onOffChannel.SendState(msg.DeviceInfo.State)
+							}
+
+							// Light output is really just an on-off and brightnessthat we want to support. Don't need colour, but
+							// don't know if NS really care about the non-colour lights
+							if msg.Name == "newlightchannelfound" {
+								device[msg.DeviceInfo.ID].onOffChannel.SendState(msg.DeviceInfo.State)
+								device[msg.DeviceInfo.ID].brightnessChannel.Set(msg.DeviceInfo.Level)
+							}
 
 						}
 
@@ -131,51 +198,6 @@ func theloop(d *WebbrickDriver, config *WebbrickDriverConfig) error {
 				default:
 					webbrick.CheckForMessages()
 				}
-
-				// for { // Loop forever
-				// 	select { // This lets us do non-blocking channel reads. If we have a message, process it. If not, check for UDP data and loop
-				// 	case msg := <-webbrick.Events:
-				// 		switch msg.Name {
-				// 		case "existingsocketfound":
-				// 			fallthrough
-				// 		case "socketfound":
-				// 			fmt.Println("Socket found! MAC address is", msg.DeviceInfo.MACAddress)
-				// 			orvibo.Subscribe() // Subscribe to any unsubscribed sockets
-				// 			orvibo.Query()     // And query any unqueried sockets
-				// 		case "subscribed":
-				// 			if msg.DeviceInfo.Subscribed == false {
-
-				// 				fmt.Println("Subscription successful!")
-				// 				orvibo.Devices[msg.DeviceInfo.MACAddress].Subscribed = true
-				// 				orvibo.Query()
-				// 				fmt.Println("Query called")
-
-				// 			}
-				// 			orvibo.Query()
-				// 		case "queried":
-
-				// 			if msg.DeviceInfo.Queried == false {
-				// 				device[msg.DeviceInfo.ID] = NewOrviboDevice(d, msg.DeviceInfo)
-
-				// 				_ = d.Conn.ExportDevice(device[msg.DeviceInfo.ID])
-				// 				_ = d.Conn.ExportChannel(device[msg.DeviceInfo.ID], device[msg.DeviceInfo.ID].onOffChannel, "on-off")
-				// 				device[msg.DeviceInfo.ID].Device.Name = msg.Name
-				// 				device[msg.DeviceInfo.ID].Device.State = msg.DeviceInfo.State
-				// 				orvibo.Devices[msg.DeviceInfo.MACAddress].Queried = true
-				// 				device[msg.DeviceInfo.ID].onOffChannel.SendState(msg.DeviceInfo.State)
-
-				// 			}
-
-				// 		case "statechanged":
-				// 			fmt.Println("State changed to:", msg.DeviceInfo.State)
-				// 			if msg.DeviceInfo.Queried == true {
-				// 				device[msg.DeviceInfo.ID].Device.State = msg.DeviceInfo.State
-				// 				device[msg.DeviceInfo.ID].onOffChannel.SendState(msg.DeviceInfo.State)
-				// 			}
-				// 		}
-				// 	default:
-				// 		web.CheckForMessages()
-				// 	}
 
 			}
 

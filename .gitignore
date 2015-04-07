@@ -1,2 +1,7 @@
 .staging
 .gopath
+.gopath-cli
+.staging-cli
+*.snap
+*.deb
+*linux_arm
