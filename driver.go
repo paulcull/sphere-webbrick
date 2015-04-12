@@ -11,7 +11,8 @@ import (
 	"github.com/ninjasphere/go-ninja/logger"
 	"github.com/ninjasphere/go-ninja/support"
 
-	//"log"  // Similar thing, I suppose?
+	"strconv" // For String construction
+
 	"time" // Used as part of "setInterval" and for pausing code to allow for data to come back
 )
 
@@ -24,7 +25,7 @@ var log = logger.GetLogger(info.Name)
 // Are we ready to rock?
 var ready = false
 var started = false // Stops us from running theloop twice
-var device = make(map[int]*WebbrickDevice)
+var device = make(map[string]*WebbrickDevice)
 
 // WebbrickDriver holds info about our driver, including our configuration
 type WebbrickDriver struct {
@@ -33,25 +34,14 @@ type WebbrickDriver struct {
 	conn   *ninja.Connection
 }
 
-// WebbrickDriverConfig holds config info. I don't think it's extensively used in this driver?
-// type WebbrickDriverConfig struct {
-// 	Name            string
-// 	logger          logger.Logger
-// 	Initialised     bool
-// 	NumberOfDevices int
-// 	PollingMinutes  int
-// 	PollingActive   bool
-// }
-
 // No config provided? Set up some defaults
 func defaultConfig() *webbrick.WebbrickDriverConfig {
 
+	// Set the default Configuration
 	//log = logger.GetLogger(info.Name)
-
 	return &webbrick.WebbrickDriverConfig{
-		Name:        "PKHome",
-		Initialised: false,
-		//		NinjaLogControl: log,
+		Name:            "PKHome",
+		Initialised:     false,
 		NumberOfDevices: 0,
 		PollingMinutes:  5,
 		PollingActive:   false,
@@ -117,79 +107,120 @@ func theloop(d *WebbrickDriver, config *webbrick.WebbrickDriverConfig) error {
 				case msg := <-webbrick.Events:
 					log.Infof(" **** Event for " + msg.Name + " received...") // Tell the world what we've got
 					switch msg.Name {
+
+					// TODO - add these back in
 					// case "existingtempfound", "existingtriggerfound", "existingpirfound", "existingoutputfound", "existingbuttonfound", "existinglightchannelfound":
 					// 	fmt.Println("  **** "+msg.Name+" Webbrick device updated! DEV ID is", msg.DeviceInfo.DevID)
 
 					case "existingwebbrickupdated": // Have got a webbrick that we've already seen
-						//fmt.Println("******* HERE *******")
 						log.Infof("  **** "+msg.Name+" Webbrick seen again! DEV ID is", msg.DeviceInfo.DevID)
-						//fallthrough
+
+						// Light output is really just an on-off and brightnessthat we want to support. Don't need colour, but
+						// don't know if NS really care about the non-colour lights
+					case "existinglightchannelfound":
+						log.Infof("  **** Light Device: %s", msg.DeviceInfo.DevID)
+						device[msg.DeviceInfo.DevID].Device.State = msg.DeviceInfo.State
+						device[msg.DeviceInfo.DevID].onOffChannel.SendState(msg.DeviceInfo.State)
+						log.Infof("    ****  Set Brightness Level to : %s \n", strconv.FormatFloat(msg.DeviceInfo.Level, 'f', 2, 64))
+						device[msg.DeviceInfo.DevID].brightnessChannel.SendState(msg.DeviceInfo.Level)
+
+					case "existingtempupdated": // Have got a temp sensor that we've already seen
+						log.Infof("  **** "+msg.Name+" Webbrick Temp seen again! DEV ID is ", msg.DeviceInfo.DevID)
+						log.Infof("    ****  Set Temp Level to : %s \n", strconv.FormatFloat(msg.DeviceInfo.Level, 'f', 2, 64))
+						device[msg.DeviceInfo.DevID].temperatureChannel.SendState(msg.DeviceInfo.Level)
+
+					case "existingpirupdated": // Have got a pir sensor that we've already seen
+						log.Infof("  **** "+msg.Name+" Webbrick PIR seen again! DEV ID is ", msg.DeviceInfo.DevID)
+						// just seen it, don't trigger event
+
+					case "existingpirtriggered": // Have got a pir sensor that we've already seen
+						log.Infof("  **** "+msg.Name+" Webbrick PIR seen again! DEV ID is ", msg.DeviceInfo.DevID)
+						// can send the trigger event now
+						device[msg.DeviceInfo.DevID].motionChannel.SendMotion()
 
 					case "newwebbrickfound": // Have got a new webbrick, lets go see what it can do for us
-						log.Infof("  **** "+msg.Name+" Webbrick found! DEV ID is", msg.DeviceInfo.DevID)
+						log.Infof("  **** "+msg.Name+" Webbrick found! DEV ID is ", msg.DeviceInfo.DevID)
 						// Start the poller for the webbrick
 						webbrick.PollWBStatus(msg.DeviceInfo.DevID)
-						//fallthrough
 
-					case "newtempfound", "newtriggerfound", "newpirfound", "newoutputfound", "newbuttonfound", "newlightchannelfound":
+					// TODO Switch off all, but light and pir for now
+					//case "newtempfound", "newtriggerfound", "newpirfound", "newoutputfound", "newbuttonfound", "newlightchannelfound":
+					case "newlightchannelfound", "newtempfound", "newpirfound":
 						// These are all the devices that we care about - so lets look after them now
 						log.Infof("  **** "+msg.Name+" Webbrick device found! DEV ID is", msg.DeviceInfo.DevID)
 						str := spew.Sdump(msg.DeviceInfo)
 						log.Debugf(str)
 
-						if device[msg.DeviceInfo.ID] == nil { // Do I already know about this on the sphere ???
+						if device[msg.DeviceInfo.DevID] == nil { // Do I already know about this on the sphere ???
 							log.Infof("  **** NEW DEVICE NEEDED -  Webbrick device found! DEV ID is", msg.DeviceInfo.DevID)
 
 							// Lets create a new sphere device driver for this webbrick device
-							device[msg.DeviceInfo.ID] = NewWebbrickDevice(d, msg.DeviceInfo)
+							device[msg.DeviceInfo.DevID] = NewWebbrickDevice(d, msg.DeviceInfo)
 
 							// Now we've got the device back from the creator let's tell the world
-							_ = d.Conn.ExportDevice(device[msg.DeviceInfo.ID])
+							_ = d.Conn.ExportDevice(device[msg.DeviceInfo.DevID])
 
 							// Set the rest of the device up
-							device[msg.DeviceInfo.ID].Device.Name = msg.Name
-							device[msg.DeviceInfo.ID].Device.State = msg.DeviceInfo.State
+							device[msg.DeviceInfo.DevID].Device.Name = msg.Name
+							device[msg.DeviceInfo.DevID].Device.State = msg.DeviceInfo.State
 							webbrick.Devices[msg.DeviceInfo.DevID].Queried = true
 
 							// Create any special channels for specfic devices and knock it out
 
-							// State output is really just an on-off that we want to support
-							if msg.Name == "newoutputfound" {
-								_ = d.Conn.ExportChannel(device[msg.DeviceInfo.ID], device[msg.DeviceInfo.ID].onOffChannel, "on-off")
-								device[msg.DeviceInfo.ID].onOffChannel.SendState(msg.DeviceInfo.State)
+							// // State output is really just an on-off that we want to support
+							// if msg.Name == "newoutputfound" {
+							// 	log.Infof("  **** Output State Device", msg.DeviceInfo.DevID)
+							// 	_ = d.Conn.ExportChannel(device[msg.DeviceInfo.DevID], device[msg.DeviceInfo.DevID].onOffChannel, "on-off")
+							// 	device[msg.DeviceInfo.DevID].onOffChannel.SendState(msg.DeviceInfo.State)
+							// }
+
+							// State output is really just a temperature that we want to support
+							if msg.Name == "newtempfound" {
+								log.Infof("  **** Temp Device", msg.DeviceInfo.DevID)
+								_ = d.Conn.ExportChannel(device[msg.DeviceInfo.DevID], device[msg.DeviceInfo.DevID].temperatureChannel, "temperature")
+								device[msg.DeviceInfo.DevID].temperatureChannel.SendState(msg.DeviceInfo.Level)
 							}
 
 							// pir output is really just motion that we want to support
 							if msg.Name == "newpirfound" {
-								_ = d.Conn.ExportChannel(device[msg.DeviceInfo.ID], device[msg.DeviceInfo.ID].motionChannel, "motion")
+								log.Infof("  **** PIR Device", msg.DeviceInfo.DevID)
+								_ = d.Conn.ExportChannel(device[msg.DeviceInfo.DevID], device[msg.DeviceInfo.DevID].motionChannel, "motion")
+								// Don't need to send a motion event, just create the device
 							}
 
 							// Light output is really just an on-off and brightnessthat we want to support. Don't need colour, but
 							// don't know if NS really care about the non-colour lights
 							if msg.Name == "newlightchannelfound" {
-								_ = d.Conn.ExportChannel(device[msg.DeviceInfo.ID], device[msg.DeviceInfo.ID].onOffChannel, "on-off")
-								_ = d.Conn.ExportChannel(device[msg.DeviceInfo.ID], device[msg.DeviceInfo.ID].brightnessChannel, "brightness")
-								device[msg.DeviceInfo.ID].onOffChannel.SendState(msg.DeviceInfo.State)
-								device[msg.DeviceInfo.ID].brightnessChannel.Set(msg.DeviceInfo.Level)
+								log.Infof("  **** Light Device: %s", msg.DeviceInfo.DevID)
+
+								_ = d.Conn.ExportChannel(device[msg.DeviceInfo.DevID], device[msg.DeviceInfo.DevID].onOffChannel, "on-off")
+								_ = d.Conn.ExportChannel(device[msg.DeviceInfo.DevID], device[msg.DeviceInfo.DevID].brightnessChannel, "brightness")
+								device[msg.DeviceInfo.DevID].onOffChannel.SendState(msg.DeviceInfo.State)
+								log.Infof("    ****  Set Brightness Level to : %s \n", strconv.FormatFloat(msg.DeviceInfo.Level, 'f', 6, 64))
+								device[msg.DeviceInfo.DevID].brightnessChannel.SendState(msg.DeviceInfo.Level)
 							}
 
 						} else {
 							log.Infof("  **** EXISTING DEVICE FOUND -  Webbrick device found! DEV ID is", msg.DeviceInfo.DevID)
 
 							// we have this device already on the sphere, lets just check our labels and levels
-
-							device[msg.DeviceInfo.ID].Device.Name = msg.DeviceInfo.Name
+							device[msg.DeviceInfo.DevID].Device.Name = msg.DeviceInfo.Name
 
 							// State output is really just an on-off that we want to support
-							if msg.Name == "newoutputfound" {
-								device[msg.DeviceInfo.ID].onOffChannel.SendState(msg.DeviceInfo.State)
-							}
+							// if msg.Name == "newoutputfound" {
+							// 	device[msg.DeviceInfo.DevID].onOffChannel.SendState(msg.DeviceInfo.State)
+							// }
 
 							// Light output is really just an on-off and brightnessthat we want to support. Don't need colour, but
 							// don't know if NS really care about the non-colour lights
 							if msg.Name == "newlightchannelfound" {
-								device[msg.DeviceInfo.ID].onOffChannel.SendState(msg.DeviceInfo.State)
-								device[msg.DeviceInfo.ID].brightnessChannel.Set(msg.DeviceInfo.Level)
+								device[msg.DeviceInfo.DevID].onOffChannel.SendState(msg.DeviceInfo.State)
+								device[msg.DeviceInfo.DevID].brightnessChannel.Set(msg.DeviceInfo.Level)
+							}
+
+							// Temp sensor
+							if msg.Name == "newtempfound" {
+								device[msg.DeviceInfo.DevID].temperatureChannel.SendState(msg.DeviceInfo.Level)
 							}
 
 						}

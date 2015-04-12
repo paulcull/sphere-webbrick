@@ -29,15 +29,15 @@ const (
 
 // webBrickDevice holds info about our socket.
 type WebbrickDevice struct {
-	driver            ninja.Driver
-	info              *model.Device
-	sendEvent         func(event string, payload interface{}) error
-	onOffChannel      *channels.OnOffChannel
-	brightnessChannel *channels.BrightnessChannel
-	motionChannel     *channels.MotionChannel
-	tempChannel       *channels.TemperatureChannel
-	Device            webbrick.Device
-	log               *logger.Logger
+	driver             ninja.Driver
+	info               *model.Device
+	sendEvent          func(event string, payload interface{}) error
+	onOffChannel       *channels.OnOffChannel
+	brightnessChannel  *channels.BrightnessChannel
+	motionChannel      *channels.MotionChannel
+	temperatureChannel *channels.TemperatureChannel
+	Device             webbrick.Device
+	log                *logger.Logger
 }
 
 func NewWebbrickDevice(driver ninja.Driver, id webbrick.Device) *WebbrickDevice {
@@ -54,12 +54,18 @@ func NewWebbrickDevice(driver ninja.Driver, id webbrick.Device) *WebbrickDevice 
 	case PIR:
 		devProductType = "motion"
 		devThingType = "Motion"
+	case STATE:
+		devProductType = "state"
+		devThingType = "State"
+	case BUTTON:
+		devProductType = "button"
+		devThingType = "Button"
 	case TEMP:
 		devProductType = "temperature"
 		devThingType = "Temperature"
 	default:
-		devProductType = "light"
-		devThingType = "Light"
+		devProductType = "unknown"
+		devThingType = "Unknown"
 	}
 
 	// LIGHT     // LIGHT - is possibly a dimmer
@@ -69,48 +75,39 @@ func NewWebbrickDevice(driver ninja.Driver, id webbrick.Device) *WebbrickDevice 
 	// STATE     // State
 	// HEARTBEAT // Heartbeat
 
-	// switch Devices[devID].Type {
-
-	// // Its a light
-	// case LIGHT:
-	// 	// update the record for new levels
-	// 	Devices[devID].Level = int(level)
-
-	// select { // This lets us do non-blocking channel reads. If we have a message, process it. If not, check for UDP data and loop
-	// case id.Type:
-	// }
-	// devType := id.Type
-
 	log.Infof("Creating a new Device, type: %s. Name now: %s", devThingType, id.Name)
 
 	device := &WebbrickDevice{
 		driver: driver,
 		Device: id,
 		info: &model.Device{
-			NaturalID:     fmt.Sprintf("device%s", id.DevID),
+			NaturalID:     fmt.Sprintf("%s", id.DevID),
 			NaturalIDType: devProductType,
 			Name:          &id.Name,
 			Signatures: &map[string]string{
 				"ninja:manufacturer": "Webbrick",
 				"ninja:productName":  "Webbrick" + devThingType + "Device",
-				"ninja:productType":  devThingType,
-				"ninja:thingType":    devProductType,
+				"ninja:productType":  devProductType,
+				"ninja:thingType":    devThingType,
 			},
 		},
-		log: logger.GetLogger("Light Device - " + id.Name),
+		log: logger.GetLogger(devThingType + " Device - " + id.Name),
 	}
+
+	log.Debugf(" ******* GOING TO CHECK FOR THE devProductType : %s", devProductType)
 
 	if devProductType == "light" {
 		device.onOffChannel = channels.NewOnOffChannel(device)
 		device.brightnessChannel = channels.NewBrightnessChannel(device)
 	}
-	if devProductType == "state" {
+	if devProductType == "state" || devProductType == "button" {
 		device.onOffChannel = channels.NewOnOffChannel(device)
 	}
-	if devProductType == "temp" {
-		device.onOffChannel = channels.NewTemperatureChannel(device)
+	if devProductType == "temperature" {
+		log.Debugf(" ** CREATING Temp Channel **")
+		device.temperatureChannel = channels.NewTemperatureChannel(device)
 	}
-	if devProductType == "pir" {
+	if devProductType == "motion" {
 		device.motionChannel = channels.NewMotionChannel()
 	}
 	return device
@@ -125,23 +122,29 @@ func (d *WebbrickDevice) GetDriver() ninja.Driver {
 }
 
 func (d *WebbrickDevice) SetBrightness(level float64) error {
-	log.Infof("Setting Brightness level to", level)
-	webbrick.SetLevel(d.Device.DevID, level)
-	d.brightnessChannel.Set(level)
+	log.Debugf(" - Setting Brightness level to", level)
+	webbrick.SetLightLevel(d.Device.DevID, level)
+	d.brightnessChannel.SendState(level)
 	return nil
 }
 
 func (d *WebbrickDevice) SetOnOff(state bool) error {
-	log.Infof("Setting state to", state)
+	log.Debugf("Setting state to", state)
 	webbrick.SetState(d.Device.DevID, state)
 	d.onOffChannel.SendState(state)
 	return nil
 }
 
 func (d *WebbrickDevice) ToggleOnOff() error {
-	log.Infof("Toggling state")
+	log.Debugf("Toggling state")
 	webbrick.ToggleState(d.Device.DevID)
 	d.onOffChannel.SendState(d.Device.State)
+	return nil
+}
+
+func (d *WebbrickDevice) PushButton() error {
+	log.Debugf("Pushing Button")
+	webbrick.PushButton(d.Device.DevID)
 	return nil
 }
 
@@ -151,7 +154,7 @@ func (d *WebbrickDevice) SetEventHandler(sendEvent func(event string, payload in
 
 var reg, _ = regexp.Compile("[^a-z0-9]")
 
-// Exported by service/device schema
+//Exported by service/device schema
 func (d *WebbrickDevice) SetName(name *string) (*string, error) {
 
 	log.Infof("Setting device name to %s", *name)
