@@ -77,6 +77,10 @@ func NewWebbrickDevice(driver ninja.Driver, id webbrick.Device) *WebbrickDevice 
 
 	log.Infof("Creating a new Device, type: %s. Name now: %s", devThingType, id.Name)
 
+	if id.Name == "" {
+		id.Name = fmt.Sprintf("%s", id.DevID)
+	}
+
 	device := &WebbrickDevice{
 		driver: driver,
 		Device: id,
@@ -122,8 +126,10 @@ func (d *WebbrickDevice) GetDriver() ninja.Driver {
 }
 
 func (d *WebbrickDevice) SetBrightness(level float64) error {
+	fmt.Printf(" - Setting Brightness level to", level)
 	log.Debugf(" - Setting Brightness level to", level)
 	webbrick.SetLightLevel(d.Device.DevID, level)
+
 	d.brightnessChannel.SendState(level)
 	return nil
 }
