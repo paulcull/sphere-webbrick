@@ -117,7 +117,7 @@ func theloop(d *WebbrickDriver, config *webbrick.WebbrickDriverConfig) error {
 
 						// Light output is really just an on-off and brightnessthat we want to support. Don't need colour, but
 						// don't know if NS really care about the non-colour lights
-					case "existinglightchannelfound":
+					case "existinglightchannelupdated":
 						log.Infof("  **** Light Device: %s", msg.DeviceInfo.DevID)
 						device[msg.DeviceInfo.DevID].Device.State = msg.DeviceInfo.State
 						device[msg.DeviceInfo.DevID].onOffChannel.SendState(msg.DeviceInfo.State)
