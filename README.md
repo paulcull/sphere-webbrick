@@ -1,5 +1,7 @@
 # driver-go-webbrick
 
+[![Greenkeeper badge](https://badges.greenkeeper.io/paulcull/sphere-webbrick.svg)](https://greenkeeper.io/)
+
 Sphere driver which interfaces with the Webbrick HA system their units.
 
 # Known Issues
